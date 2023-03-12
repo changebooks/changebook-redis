@@ -196,9 +196,9 @@ public final class CacheLock {
             Boolean r = renewal(threadId, expirationTime, timeUnit);
             if (r != null && r) {
                 scheduleRenewal(threadId, delayTime, expirationTime, timeUnit);
-                LOGGER.debug("scheduleRenewal start, token: {}", token(threadId));
+                LOGGER.debug("scheduleRenewal start, token: {}, threadId: {}", getToken(), threadId);
             } else {
-                LOGGER.debug("scheduleRenewal stop, token: {}", token(threadId));
+                LOGGER.debug("scheduleRenewal stop, token: {}, threadId: {}", getToken(), threadId);
             }
         }, delayTime, timeUnit);
     }

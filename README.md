@@ -6,7 +6,7 @@
 <dependency>
     <groupId>io.github.changebooks</groupId>
     <artifactId>changebook-redis</artifactId>
-    <version>1.1.3</version>
+    <version>1.1.4</version>
 </dependency>
 ```
 
