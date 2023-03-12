@@ -1,5 +1,7 @@
 package io.github.changebooks.redis;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.connection.RedisStringCommands;
 import org.springframework.data.redis.connection.ReturnType;
 import org.springframework.data.redis.core.RedisCallback;
@@ -15,6 +17,9 @@ import java.util.concurrent.TimeUnit;
  * @author changebooks@qq.com
  */
 public final class CacheLock {
+
+    private static final Logger LOGGER = LoggerFactory.getLogger(CacheLock.class);
+
     /**
      * 默认的令牌拼接符
      * 拼接令牌，如，"客户端id-线程id"
@@ -74,13 +79,27 @@ public final class CacheLock {
      * @param timeUnit       过期时间的单位
      * @return 加锁成功？
      */
-    public Boolean lock(long expirationTime, TimeUnit timeUnit) {
+    public boolean lock(long expirationTime, TimeUnit timeUnit) {
+        long threadId = Thread.currentThread().getId();
+        Boolean result = lock(threadId, expirationTime, timeUnit);
+        return result != null && result;
+    }
+
+    /**
+     * 加锁
+     *
+     * @param threadId       线程id
+     * @param expirationTime 过期时间
+     * @param timeUnit       过期时间的单位
+     * @return 加锁成功？
+     */
+    public Boolean lock(long threadId, long expirationTime, TimeUnit timeUnit) {
         Assert.isTrue(expirationTime > 0, "expirationTime must be greater than 0");
 
         Expiration expiredAt = Expiration.from(expirationTime, timeUnit);
         return template.execute((RedisCallback<Boolean>) conn -> conn.set(
                 name,
-                token(),
+                token(threadId),
                 expiredAt,
                 RedisStringCommands.SetOption.SET_IF_ABSENT));
     }
@@ -90,13 +109,25 @@ public final class CacheLock {
      *
      * @return 解锁成功？
      */
-    public Boolean unlock() {
+    public boolean unlock() {
+        long threadId = Thread.currentThread().getId();
+        Boolean result = unlock(threadId);
+        return result != null && result;
+    }
+
+    /**
+     * 解锁
+     *
+     * @param threadId 线程id
+     * @return 解锁成功？
+     */
+    public Boolean unlock(long threadId) {
         return template.execute((RedisCallback<Boolean>) conn -> conn.eval(
                 UNLOCK_SCRIPT,
                 ReturnType.BOOLEAN,
                 1,
                 name,
-                token()));
+                token(threadId)));
     }
 
     /**
@@ -106,7 +137,21 @@ public final class CacheLock {
      * @param timeUnit       过期时间的单位
      * @return 续期成功？
      */
-    public Boolean renewal(long expirationTime, TimeUnit timeUnit) {
+    public boolean renewal(long expirationTime, TimeUnit timeUnit) {
+        long threadId = Thread.currentThread().getId();
+        Boolean result = renewal(threadId, expirationTime, timeUnit);
+        return result != null && result;
+    }
+
+    /**
+     * 续期
+     *
+     * @param threadId       线程id
+     * @param expirationTime 过期时间
+     * @param timeUnit       过期时间的单位
+     * @return 续期成功？
+     */
+    public Boolean renewal(long threadId, long expirationTime, TimeUnit timeUnit) {
         Assert.isTrue(expirationTime > 0, "expirationTime must be greater than 0");
 
         long expirationTimeMs = Expiration.from(expirationTime, timeUnit).getExpirationTimeInMilliseconds();
@@ -117,13 +162,12 @@ public final class CacheLock {
                 ReturnType.BOOLEAN,
                 1,
                 name,
-                token(),
+                token(threadId),
                 expiredAt.getBytes()));
     }
 
     /**
      * 定时续期
-     * 关注时间轮配置
      *
      * @param delayTime      延迟时间
      * @param expirationTime 过期时间
@@ -131,13 +175,30 @@ public final class CacheLock {
      * @see TimeoutScheduler
      */
     public void scheduleRenewal(long delayTime, long expirationTime, TimeUnit timeUnit) {
+        long threadId = Thread.currentThread().getId();
+        scheduleRenewal(threadId, delayTime, expirationTime, timeUnit);
+    }
+
+    /**
+     * 定时续期
+     *
+     * @param threadId       线程id
+     * @param delayTime      延迟时间
+     * @param expirationTime 过期时间
+     * @param timeUnit       时间单位
+     * @see TimeoutScheduler
+     */
+    public void scheduleRenewal(long threadId, long delayTime, long expirationTime, TimeUnit timeUnit) {
         Assert.isTrue(delayTime > 0, "delayTime must be greater than 0");
         Assert.isTrue(expirationTime > 0, "expirationTime must be greater than 0");
 
         TimeoutScheduler.newTimeout(timeout -> {
-            Boolean r = renewal(expirationTime, timeUnit);
+            Boolean r = renewal(threadId, expirationTime, timeUnit);
             if (r != null && r) {
-                scheduleRenewal(delayTime, expirationTime, timeUnit);
+                scheduleRenewal(threadId, delayTime, expirationTime, timeUnit);
+                LOGGER.debug("scheduleRenewal start, token: {}", token(threadId));
+            } else {
+                LOGGER.debug("scheduleRenewal stop, token: {}", token(threadId));
             }
         }, delayTime, timeUnit);
     }
@@ -145,10 +206,10 @@ public final class CacheLock {
     /**
      * 格式化令牌，解锁和续期的令牌
      *
+     * @param threadId 线程id
      * @return 格式化后的令牌，如，"客户端id-线程id"
      */
-    public byte[] token() {
-        long threadId = Thread.currentThread().getId();
+    public byte[] token(long threadId) {
         String token = getToken() + SEPARATOR + threadId;
         return token.getBytes();
     }
