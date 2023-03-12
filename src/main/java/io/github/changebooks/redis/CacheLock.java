@@ -16,6 +16,12 @@ import java.util.concurrent.TimeUnit;
  */
 public final class CacheLock {
     /**
+     * 默认的令牌拼接符
+     * 拼接令牌，如，"客户端id-线程id"
+     */
+    private static final String SEPARATOR = "-";
+
+    /**
      * 解锁命令
      */
     public static final byte[] UNLOCK_SCRIPT = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) else return 0 end".getBytes();
@@ -33,7 +39,7 @@ public final class CacheLock {
     /**
      * 解锁和续期的令牌
      */
-    private byte[] token;
+    private String token;
 
     /**
      * {@link StringRedisTemplate}
@@ -74,7 +80,7 @@ public final class CacheLock {
         Expiration expiredAt = Expiration.from(expirationTime, timeUnit);
         return template.execute((RedisCallback<Boolean>) conn -> conn.set(
                 name,
-                token,
+                token(),
                 expiredAt,
                 RedisStringCommands.SetOption.SET_IF_ABSENT));
     }
@@ -90,7 +96,7 @@ public final class CacheLock {
                 ReturnType.BOOLEAN,
                 1,
                 name,
-                token));
+                token()));
     }
 
     /**
@@ -111,22 +117,54 @@ public final class CacheLock {
                 ReturnType.BOOLEAN,
                 1,
                 name,
-                token,
+                token(),
                 expiredAt.getBytes()));
+    }
+
+    /**
+     * 定时续期
+     * 关注时间轮配置
+     *
+     * @param delayTime      延迟时间
+     * @param expirationTime 过期时间
+     * @param timeUnit       时间单位
+     * @see TimeoutScheduler
+     */
+    public void scheduleRenewal(long delayTime, long expirationTime, TimeUnit timeUnit) {
+        Assert.isTrue(delayTime > 0, "delayTime must be greater than 0");
+        Assert.isTrue(expirationTime > 0, "expirationTime must be greater than 0");
+
+        TimeoutScheduler.newTimeout(timeout -> {
+            Boolean r = renewal(expirationTime, timeUnit);
+            if (r != null && r) {
+                scheduleRenewal(delayTime, expirationTime, timeUnit);
+            }
+        }, delayTime, timeUnit);
+    }
+
+    /**
+     * 格式化令牌，解锁和续期的令牌
+     *
+     * @return 格式化后的令牌，如，"客户端id-线程id"
+     */
+    public byte[] token() {
+        long threadId = Thread.currentThread().getId();
+        String token = getToken() + SEPARATOR + threadId;
+        return token.getBytes();
     }
 
     public byte[] getName() {
         return name;
     }
 
-    public byte[] getToken() {
+    public String getToken() {
         return token;
     }
 
     public CacheLock setToken(String token) {
         Assert.hasText(token, "token can't be empty");
 
-        this.token = token.getBytes();
+        this.token = token;
         return this;
     }
 

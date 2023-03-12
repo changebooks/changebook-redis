@@ -6,7 +6,7 @@
 <dependency>
     <groupId>io.github.changebooks</groupId>
     <artifactId>changebook-redis</artifactId>
-    <version>1.1.1</version>
+    <version>1.1.2</version>
 </dependency>
 ```
 
@@ -129,6 +129,9 @@ Boolean 解锁成功？ = cacheLock.unlock();
 
 // 续期
 Boolean 续期成功？ = cacheLock.renewal(过期时间, 时间单位);
+
+// 定时续期
+cacheLock.scheduleRenewal(延迟时间, 过期时间, 时间单位);
 ```
 
 ### 分布式限流，固定时间窗口，x秒内，许可n次
